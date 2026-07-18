@@ -1,3 +1,2 @@
-pyrogram
+aiogram
 requests
-tgCrypto
