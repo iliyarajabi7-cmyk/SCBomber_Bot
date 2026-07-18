@@ -133,7 +133,7 @@ def stop_kb():
 
 
 @dp.message(Command("start"))
-async def start(m: types Message):
+async def start(m: types.Message):
     await m.answer(
         "╔══════════════════════╗\n"
         "║   💣 ILIYA SMS BOT   ║\n"
@@ -145,7 +145,7 @@ async def start(m: types Message):
 
 
 @dp.callback_query(F.data == "use")
-async def use_sub(cb: types CallbackQuery, state: FSMContext):
+async def use_sub(cb: types.CallbackQuery, state: FSMContext):
     u = str(cb.from_user.id)
     if int(u) != ADMIN:
         dd = DATA.get(u, {})
@@ -160,14 +160,14 @@ async def use_sub(cb: types CallbackQuery, state: FSMContext):
 
 
 @dp.callback_query(F.data.startswith("m_"), Bomb.mode)
-async def mode_pick(cb: types CallbackQuery, state: FSMContext):
+async def mode_pick(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(mode=cb.data[2:])
     await state.set_state(Bomb.phone)
     await cb.message.edit_text("📱 **شماره موبایل رو وارد کن:**\nمثال: `09121234567`")
 
 
 @dp.message(Bomb.phone)
-async def phone_get(m: types Message, state: FSMContext):
+async def phone_get(m: types.Message, state: FSMContext):
     p = m.text.strip()
     if blk(p):
         await m.answer("⚠️ **شماره نامعتبر!** این شماره در لیست سیاه است.")
@@ -178,7 +178,7 @@ async def phone_get(m: types Message, state: FSMContext):
 
 
 @dp.message(Bomb.rounds)
-async def rounds_get(m: types Message, state: FSMContext):
+async def rounds_get(m: types.Message, state: FSMContext):
     r = m.text.strip()
     if not r.isdigit() or int(r) < 1 or int(r) > 100:
         await m.answer("عدد بین ۱ تا ۱۰۰")
@@ -189,7 +189,7 @@ async def rounds_get(m: types Message, state: FSMContext):
 
 
 @dp.callback_query(F.data == "stop")
-async def stop_bomb(cb: types CallbackQuery):
+async def stop_bomb(cb: types.CallbackQuery):
     u = str(cb.from_user.id)
     DATA.setdefault(u, {})["st"] = True
     save()
@@ -201,12 +201,12 @@ async def stop_bomb(cb: types CallbackQuery):
 
 
 @dp.callback_query(F.data == "buy")
-async def buy_menu(cb: types CallbackQuery):
+async def buy_menu(cb: types.CallbackQuery):
     await cb.message.edit_text("💎 **انتخاب پلن:**", reply_markup=plans_kb())
 
 
 @dp.callback_query(F.data.startswith("p_"))
-async def plan_pick(cb: types CallbackQuery, state: FSMContext):
+async def plan_pick(cb: types.CallbackQuery, state: FSMContext):
     pl = cb.data[2:]
     nm = {"1m": "یک ماهه", "3m": "سه ماهه", "6m": "شش ماهه"}
     pr = {"1m": "100", "3m": "250", "6m": "450"}
@@ -224,7 +224,7 @@ async def plan_pick(cb: types CallbackQuery, state: FSMContext):
 
 
 @dp.message(Buy.card, F.photo)
-async def receipt(m: types Message, state: FSMContext):
+async def receipt(m: types.Message, state: FSMContext):
     u = str(m.from_user.id)
     d = await state.get_data()
     pl = d.get("plan", "1m")
@@ -246,7 +246,7 @@ async def receipt(m: types Message, state: FSMContext):
 
 
 @dp.callback_query(F.data.startswith("app_"))
-async def approve(cb: types CallbackQuery):
+async def approve(cb: types.CallbackQuery):
     _, uid, pl = cb.data.split("_")
     days = {"1m": 30, "3m": 90, "6m": 180}
     DATA[uid] = {
@@ -260,14 +260,14 @@ async def approve(cb: types CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("rej_"))
-async def reject(cb: types CallbackQuery):
+async def reject(cb: types.CallbackQuery):
     uid = cb.data[4:]
     await cb.message.edit_text(cb.message.text + "\n\n❌ **رد شد.**")
     await bot.send_message(int(uid), "❌ پرداخت تایید نشد. دوباره تلاش کن.")
 
 
 @dp.callback_query(F.data == "test")
-async def test_free(cb: types CallbackQuery):
+async def test_free(cb: types.CallbackQuery):
     u = str(cb.from_user.id)
     DATA[u] = {"exp": datetime.now() + timedelta(days=1), "jo": datetime.now(), "st": False}
     save()
@@ -275,7 +275,7 @@ async def test_free(cb: types CallbackQuery):
 
 
 @dp.callback_query(F.data == "account")
-async def account(cb: types CallbackQuery):
+async def account(cb: types.CallbackQuery):
     u = str(cb.from_user.id)
     dd = DATA.get(u, {})
     exp = dd.get("exp", datetime.min)
@@ -301,7 +301,7 @@ async def account(cb: types CallbackQuery):
 
 
 @dp.callback_query(F.data == "menu")
-async def back_menu(cb: types CallbackQuery, state: FSMContext):
+async def back_menu(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.message.edit_text("یک گزینه رو انتخاب کن:", reply_markup=menu_kb())
 
